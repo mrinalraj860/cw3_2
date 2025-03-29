@@ -405,27 +405,27 @@ static bool should_hide_entry(struct file *dir, const char *name,
 
 	err = vfs_path_lookup(dir->f_path.dentry, dir->f_path.mnt, name, 0,
 			      &path);
-	pr_info("Checking file: %s\n", name);
 	if (err)
 		return false;
 
 	err = vfs_getattr(&path, &stat, STATX_TYPE, AT_NO_AUTOMOUNT);
-	pr_info("Filter: %s, mode: %o\n", filter, stat.mode);
 	path_put(&path);
 	if (err)
 		return false;
 
 	umode_t mode = stat.mode;
+	pr_info("Checking file: %s, mode: %o\n", name, mode);
 
+	// Split comma-separated filter list
 	char *filter_copy = kstrdup(filter, GFP_KERNEL);
-	char *token, *saveptr;
-	bool result = false;
-
 	if (!filter_copy)
 		return false;
 
-	for (token = strtok_r(filter_copy, ",", &saveptr); token && !result;
-	     token = strtok_r(NULL, ",", &saveptr)) {
+	char *token;
+	char *ptr = filter_copy;
+	bool result = false;
+
+	while ((token = strsep(&ptr, ",")) != NULL) {
 		if ((!strcmp(token, "regular") && S_ISREG(mode)) ||
 		    (!strcmp(token, "directory") && S_ISDIR(mode)) ||
 		    (!strcmp(token, "character") && S_ISCHR(mode)) ||
@@ -434,6 +434,7 @@ static bool should_hide_entry(struct file *dir, const char *name,
 		    (!strcmp(token, "socket") && S_ISSOCK(mode)) ||
 		    (!strcmp(token, "symlink") && S_ISLNK(mode))) {
 			result = true;
+			break;
 		}
 	}
 
