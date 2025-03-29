@@ -340,6 +340,10 @@ struct getdents_callback64 {
 	int prev_reclen;
 	int count;
 	int error;
+
+	// CW3 added field
+	const char *filter_type;
+	struct file *dir_file;
 };
 
 static bool filldir64(struct dir_context *ctx, const char *name, int namlen,
@@ -387,18 +391,6 @@ efault:
 }
 //CW3
 #define XATTR_KEY "user.cw3_hide"
-
-struct getdents_callback64 {
-	struct dir_context ctx;
-	struct linux_dirent64 __user *current_dir;
-	int error;
-	int count;
-	unsigned short prev_reclen;
-
-	// CW3 added field
-	const char *filter_type;
-	struct file *dir_file;
-};
 
 // Helper to check if file matches the type to hide
 static bool should_hide_entry(struct file *dir, const char *name,
