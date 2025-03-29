@@ -406,27 +406,39 @@ static bool should_hide_entry(struct file *dir, const char *name,
 	err = vfs_path_lookup(dir->f_path.dentry, dir->f_path.mnt, name, 0,
 			      &path);
 	pr_info("Checking file: %s\n", name);
-	pr_info("Filter: %s, mode: %o\n", filter, stat.mode);
 	if (err)
 		return false;
 
 	err = vfs_getattr(&path, &stat, STATX_TYPE, AT_NO_AUTOMOUNT);
+	pr_info("Filter: %s, mode: %o\n", filter, stat.mode);
 	path_put(&path);
 	if (err)
 		return false;
 
 	umode_t mode = stat.mode;
 
-	if ((!strcmp(filter, "regular") && S_ISREG(mode)) ||
-	    (!strcmp(filter, "directory") && S_ISDIR(mode)) ||
-	    (!strcmp(filter, "character") && S_ISCHR(mode)) ||
-	    (!strcmp(filter, "block") && S_ISBLK(mode)) ||
-	    (!strcmp(filter, "fifo") && S_ISFIFO(mode)) ||
-	    (!strcmp(filter, "socket") && S_ISSOCK(mode)) ||
-	    (!strcmp(filter, "symlink") && S_ISLNK(mode)))
-		return true;
+	char *filter_copy = kstrdup(filter, GFP_KERNEL);
+	char *token, *saveptr;
+	bool result = false;
 
-	return false;
+	if (!filter_copy)
+		return false;
+
+	for (token = strtok_r(filter_copy, ",", &saveptr); token && !result;
+	     token = strtok_r(NULL, ",", &saveptr)) {
+		if ((!strcmp(token, "regular") && S_ISREG(mode)) ||
+		    (!strcmp(token, "directory") && S_ISDIR(mode)) ||
+		    (!strcmp(token, "character") && S_ISCHR(mode)) ||
+		    (!strcmp(token, "block") && S_ISBLK(mode)) ||
+		    (!strcmp(token, "fifo") && S_ISFIFO(mode)) ||
+		    (!strcmp(token, "socket") && S_ISSOCK(mode)) ||
+		    (!strcmp(token, "symlink") && S_ISLNK(mode))) {
+			result = true;
+		}
+	}
+
+	kfree(filter_copy);
+	return result;
 }
 
 // Custom filldir (MUST return bool)
