@@ -392,7 +392,6 @@ efault:
 //CW3
 #define XATTR_KEY "user.cw3_hide"
 
-// Helper to check if file matches the type to hide
 static bool should_hide_entry(struct file *dir, const char *name,
 			      const char *filter)
 {
@@ -400,12 +399,10 @@ static bool should_hide_entry(struct file *dir, const char *name,
 	struct kstat stat;
 	int err;
 
-	// Skip . and ..
 	if ((name[0] == '.' && name[1] == '\0') ||
 	    (name[0] == '.' && name[1] == '.' && name[2] == '\0'))
 		return false;
 
-	// Lookup the file under directory
 	err = vfs_path_lookup(dir->f_path.dentry, dir->f_path.mnt, name, 0,
 			      &path);
 	if (err)
@@ -424,14 +421,15 @@ static bool should_hide_entry(struct file *dir, const char *name,
 	    (!strcmp(filter, "block") && S_ISBLK(mode)) ||
 	    (!strcmp(filter, "fifo") && S_ISFIFO(mode)) ||
 	    (!strcmp(filter, "socket") && S_ISSOCK(mode)) ||
-	    (!strcmp(filter, "symlink") && S_ISLNK(mode))) {
+	    (!strcmp(filter, "symlink") && S_ISLNK(mode)))
 		return true;
-	}
+
 	return false;
 }
 
-static int cw3_filldir64(struct dir_context *ctx, const char *name, int namlen,
-			 loff_t offset, u64 ino, unsigned int d_type)
+// Custom filldir (MUST return bool)
+static bool cw3_filldir64(struct dir_context *ctx, const char *name, int namlen,
+			  loff_t offset, u64 ino, unsigned int d_type)
 {
 	struct getdents_callback64 *buf =
 		container_of(ctx, struct getdents_callback64, ctx);
@@ -440,23 +438,23 @@ static int cw3_filldir64(struct dir_context *ctx, const char *name, int namlen,
 			   sizeof(u64));
 
 	if (should_hide_entry(buf->dir_file, name, buf->filter_type))
-		return 0; // Skip this entry
+		return true; // Skip this file by not writing it
 
 	if (reclen > buf->count)
-		return -EINVAL;
+		return false;
 
 	dirent = buf->current_dir;
 	if (put_user(ino, &dirent->d_ino) ||
 	    put_user(reclen, &dirent->d_reclen) ||
 	    copy_to_user(dirent->d_name, name, namlen) ||
-	    put_user(0, dirent->d_name + namlen) || // null-terminate
+	    put_user(0, dirent->d_name + namlen) ||
 	    put_user(d_type, &dirent->d_type))
-		return -EFAULT;
+		return false;
 
 	buf->prev_reclen = reclen;
 	buf->current_dir += reclen;
 	buf->count -= reclen;
-	return 0;
+	return true;
 }
 
 SYSCALL_DEFINE3(getdents64, unsigned int, fd, struct linux_dirent64 __user *,
@@ -479,10 +477,11 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd, struct linux_dirent64 __user *,
 	if (fd_empty(f))
 		return -EBADF;
 
-	// Allocate memory and get xattr value
+	// Allocate and check xattr
 	xattr_buf = kzalloc(64, GFP_KERNEL);
 	if (xattr_buf) {
-		xlen = vfs_getxattr(fd_file(f)->f_path.dentry, XATTR_KEY,
+		xlen = vfs_getxattr(mnt_idmap(buf.dir_file->f_path.mnt),
+				    buf.dir_file->f_path.dentry, XATTR_KEY,
 				    xattr_buf, 63);
 		if (xlen > 0) {
 			buf.filter_type = xattr_buf;
