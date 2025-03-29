@@ -405,6 +405,8 @@ static bool should_hide_entry(struct file *dir, const char *name,
 
 	err = vfs_path_lookup(dir->f_path.dentry, dir->f_path.mnt, name, 0,
 			      &path);
+	pr_info("Checking file: %s\n", name);
+	pr_info("Filter: %s, mode: %o\n", filter, stat.mode);
 	if (err)
 		return false;
 
