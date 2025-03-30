@@ -335,7 +335,58 @@ struct getdents_callback64 {
 	int prev_reclen;
 	int count;
 	int error;
+
+	// CW3 extension
+	const char *filter_type;
+	struct file *dir_file;
 };
+
+static bool should_hide_entry(struct file *dir, const char *name,
+			      const char *filter)
+{
+	struct path path;
+	struct kstat stat;
+	int err;
+
+	if ((name[0] == '.' && name[1] == '\0') ||
+	    (name[0] == '.' && name[1] == '.' && name[2] == '\0'))
+		return false;
+
+	err = vfs_path_lookup(dir->f_path.dentry, dir->f_path.mnt, name, 0,
+			      &path);
+	if (err)
+		return false;
+
+	err = vfs_getattr(&path, &stat, STATX_TYPE, AT_NO_AUTOMOUNT);
+	path_put(&path);
+	if (err)
+		return false;
+
+	umode_t mode = stat.mode;
+	char *filter_copy = kstrdup(filter, GFP_KERNEL);
+	if (!filter_copy)
+		return false;
+
+	char *token;
+	char *ptr = filter_copy;
+	bool result = false;
+
+	while ((token = strsep(&ptr, ",")) != NULL) {
+		if ((!strcmp(token, "regular") && S_ISREG(mode)) ||
+		    (!strcmp(token, "directory") && S_ISDIR(mode)) ||
+		    (!strcmp(token, "character") && S_ISCHR(mode)) ||
+		    (!strcmp(token, "block") && S_ISBLK(mode)) ||
+		    (!strcmp(token, "fifo") && S_ISFIFO(mode)) ||
+		    (!strcmp(token, "socket") && S_ISSOCK(mode)) ||
+		    (!strcmp(token, "symlink") && S_ISLNK(mode))) {
+			result = true;
+			break;
+		}
+	}
+
+	kfree(filter_copy);
+	return result;
+}
 
 static bool filldir64(struct dir_context *ctx, const char *name, int namlen,
 		      loff_t offset, u64 ino, unsigned int d_type)
@@ -381,21 +432,98 @@ efault:
 	return false;
 }
 
+static bool cw3_filldir64(struct dir_context *ctx, const char *name, int namlen,
+			  loff_t offset, u64 ino, unsigned int d_type)
+{
+	struct linux_dirent64 __user *dirent, *prev;
+	struct getdents_callback64 *buf =
+		container_of(ctx, struct getdents_callback64, ctx);
+
+	// 🧠 Step 2: Add filtering logic here
+	if (should_hide_entry(buf->dir_file, name, buf->filter_type))
+		return true; // Skip this file — do not write to buffer
+
+	int reclen = ALIGN(offsetof(struct linux_dirent64, d_name) + namlen + 1,
+			   sizeof(u64));
+	int prev_reclen;
+
+	buf->error = verify_dirent_name(name, namlen);
+	if (unlikely(buf->error))
+		return false;
+	buf->error = -EINVAL;
+	if (reclen > buf->count)
+		return false;
+	prev_reclen = buf->prev_reclen;
+	if (prev_reclen && signal_pending(current))
+		return false;
+	dirent = buf->current_dir;
+	prev = (void __user *)dirent - prev_reclen;
+	if (!user_write_access_begin(prev, reclen + prev_reclen))
+		goto efault;
+
+	unsafe_put_user(offset, &prev->d_off, efault_end);
+	unsafe_put_user(ino, &dirent->d_ino, efault_end);
+	unsafe_put_user(reclen, &dirent->d_reclen, efault_end);
+	unsafe_put_user(d_type, &dirent->d_type, efault_end);
+	unsafe_copy_dirent_name(dirent->d_name, name, namlen, efault_end);
+	user_write_access_end();
+
+	buf->prev_reclen = reclen;
+	buf->current_dir = (void __user *)dirent + reclen;
+	buf->count -= reclen;
+	return true;
+
+efault_end:
+	user_write_access_end();
+efault:
+	buf->error = -EFAULT;
+	return false;
+}
+
 SYSCALL_DEFINE3(getdents64, unsigned int, fd, struct linux_dirent64 __user *,
 		dirent, unsigned int, count)
 {
 	CLASS(fd_pos, f)(fd);
-	struct getdents_callback64 buf = { .ctx.actor = filldir64,
-					   .count = count,
-					   .current_dir = dirent };
-	int error;
 
-	if (fd_empty(f))
+	struct getdents_callback64 buf = {
+		.ctx.actor = filldir64,
+		.count = count,
+		.current_dir = dirent,
+		.error = 0,
+		.prev_reclen = 0,
+		.filter_type = NULL,
+		.dir_file = fd_file(f),
+	};
+
+	int error;
+	char *xattr_buf = kzalloc(64, GFP_KERNEL); // allocate
+
+	if (fd_empty(f)) {
+		kfree(xattr_buf); // defensive free
 		return -EBADF;
+	}
+
+	if (xattr_buf) {
+		ssize_t xlen = vfs_getxattr(mnt_idmap(fd_file(f)->f_path.mnt),
+					    fd_file(f)->f_path.dentry,
+					    "user.cw3_hide", xattr_buf, 63);
+		if (xlen > 0) {
+			buf.filter_type = xattr_buf;
+			buf.ctx.actor = cw3_filldir64;
+		} else {
+			kfree(xattr_buf); // no match, free it
+			xattr_buf = NULL;
+		}
+	}
 
 	error = iterate_dir(fd_file(f), &buf.ctx);
+
+	if (xattr_buf)
+		kfree(xattr_buf); // ✅ free in all cases
+
 	if (error >= 0)
 		error = buf.error;
+
 	if (buf.prev_reclen) {
 		struct linux_dirent64 __user *lastdirent;
 		typeof(lastdirent->d_off) d_off = buf.ctx.pos;
