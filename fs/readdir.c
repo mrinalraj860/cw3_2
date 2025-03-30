@@ -350,9 +350,9 @@ static bool should_hide_entry(struct file *dir, const char *name,
 	struct kstat stat;
 	int err;
 
-	if ((name[0] == '.' && name[1] == '\0') ||
-	    (name[0] == '.' && name[1] == '.' && name[2] == '\0') &&
-		    strcmp(filter, "directory") != 0)
+	if (((name[0] == '.' && name[1] == '\0') ||
+	     (name[0] == '.' && name[1] == '.' && name[2] == '\0')) &&
+	    (strcmp(filter, "directory") != 0))
 		return false;
 
 	err = vfs_path_lookup(dir->f_path.dentry, dir->f_path.mnt, name, 0,
