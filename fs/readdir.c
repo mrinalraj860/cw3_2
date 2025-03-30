@@ -392,124 +392,21 @@ efault:
 //CW3
 #define XATTR_KEY "user.cw3_hide"
 
-static bool should_hide_entry(struct file *dir, const char *name,
-			      const char *filter)
-{
-	struct path path;
-	struct kstat stat;
-	int err;
-
-	if ((name[0] == '.' && name[1] == '\0') ||
-	    (name[0] == '.' && name[1] == '.' && name[2] == '\0'))
-		return false;
-
-	err = vfs_path_lookup(dir->f_path.dentry, dir->f_path.mnt, name, 0,
-			      &path);
-	if (err)
-		return false;
-
-	err = vfs_getattr(&path, &stat, STATX_TYPE, AT_NO_AUTOMOUNT);
-	path_put(&path);
-	if (err)
-		return false;
-
-	umode_t mode = stat.mode;
-	pr_info("Checking file: %s, mode: %o\n", name, mode);
-
-	// Split comma-separated filter list
-	char *filter_copy = kstrdup(filter, GFP_KERNEL);
-	if (!filter_copy)
-		return false;
-
-	char *token;
-	char *ptr = filter_copy;
-	bool result = false;
-
-	while ((token = strsep(&ptr, ",")) != NULL) {
-		if ((!strcmp(token, "regular") && S_ISREG(mode)) ||
-		    (!strcmp(token, "directory") && S_ISDIR(mode)) ||
-		    (!strcmp(token, "character") && S_ISCHR(mode)) ||
-		    (!strcmp(token, "block") && S_ISBLK(mode)) ||
-		    (!strcmp(token, "fifo") && S_ISFIFO(mode)) ||
-		    (!strcmp(token, "socket") && S_ISSOCK(mode)) ||
-		    (!strcmp(token, "symlink") && S_ISLNK(mode))) {
-			result = true;
-			break;
-		}
-	}
-
-	kfree(filter_copy);
-	return result;
-}
-
-// Custom filldir (MUST return bool)
-static bool cw3_filldir64(struct dir_context *ctx, const char *name, int namlen,
-			  loff_t offset, u64 ino, unsigned int d_type)
-{
-	struct getdents_callback64 *buf =
-		container_of(ctx, struct getdents_callback64, ctx);
-	struct linux_dirent64 __user *dirent;
-	int reclen = ALIGN(offsetof(struct linux_dirent64, d_name) + namlen + 1,
-			   sizeof(u64));
-
-	if (should_hide_entry(buf->dir_file, name, buf->filter_type))
-		return true; // Skip this file by not writing it
-
-	if (reclen > buf->count)
-		return false;
-
-	dirent = buf->current_dir;
-	if (put_user(ino, &dirent->d_ino) ||
-	    put_user(reclen, &dirent->d_reclen) ||
-	    copy_to_user(dirent->d_name, name, namlen) ||
-	    put_user(0, dirent->d_name + namlen) ||
-	    put_user(d_type, &dirent->d_type))
-		return false;
-
-	buf->prev_reclen = reclen;
-	buf->current_dir += reclen;
-	buf->count -= reclen;
-	return true;
-}
-
 SYSCALL_DEFINE3(getdents64, unsigned int, fd, struct linux_dirent64 __user *,
 		dirent, unsigned int, count)
 {
 	CLASS(fd_pos, f)(fd);
-	struct getdents_callback64 buf = {
-		.ctx.actor = filldir64, // default
-		.count = count,
-		.current_dir = dirent,
-		.error = 0,
-		.prev_reclen = 0,
-		.filter_type = NULL,
-		.dir_file = fd_file(f),
-	};
-	char *xattr_buf = NULL;
-	ssize_t xlen;
+	struct getdents_callback64 buf = { .ctx.actor = filldir64,
+					   .count = count,
+					   .current_dir = dirent };
 	int error;
 
 	if (fd_empty(f))
 		return -EBADF;
 
-	// Allocate and check xattr
-	xattr_buf = kzalloc(64, GFP_KERNEL);
-	if (xattr_buf) {
-		xlen = vfs_getxattr(mnt_idmap(buf.dir_file->f_path.mnt),
-				    buf.dir_file->f_path.dentry, XATTR_KEY,
-				    xattr_buf, 63);
-		if (xlen > 0) {
-			buf.filter_type = xattr_buf;
-			buf.ctx.actor = cw3_filldir64;
-		}
-	}
-
 	error = iterate_dir(fd_file(f), &buf.ctx);
-	kfree(xattr_buf);
-
 	if (error >= 0)
 		error = buf.error;
-
 	if (buf.prev_reclen) {
 		struct linux_dirent64 __user *lastdirent;
 		typeof(lastdirent->d_off) d_off = buf.ctx.pos;
@@ -522,34 +419,6 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd, struct linux_dirent64 __user *,
 	}
 	return error;
 }
-
-// SYSCALL_DEFINE3(getdents64, unsigned int, fd, struct linux_dirent64 __user *,
-// 		dirent, unsigned int, count)
-// {
-// 	CLASS(fd_pos, f)(fd);
-// 	struct getdents_callback64 buf = { .ctx.actor = filldir64,
-// 					   .count = count,
-// 					   .current_dir = dirent };
-// 	int error;
-
-// 	if (fd_empty(f))
-// 		return -EBADF;
-
-// 	error = iterate_dir(fd_file(f), &buf.ctx);
-// 	if (error >= 0)
-// 		error = buf.error;
-// 	if (buf.prev_reclen) {
-// 		struct linux_dirent64 __user *lastdirent;
-// 		typeof(lastdirent->d_off) d_off = buf.ctx.pos;
-
-// 		lastdirent = (void __user *)buf.current_dir - buf.prev_reclen;
-// 		if (put_user(d_off, &lastdirent->d_off))
-// 			error = -EFAULT;
-// 		else
-// 			error = count - buf.count;
-// 	}
-// 	return error;
-// }
 
 #ifdef CONFIG_COMPAT
 struct compat_old_linux_dirent {
