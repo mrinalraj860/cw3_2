@@ -503,12 +503,10 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd, struct linux_dirent64 __user *,
 		dirent, unsigned int, count)
 {
 	CLASS(fd_pos, f)(fd);
-	struct getdents_callback64 buf = {
-		.ctx.actor = filldir64,
-		.count = count,
-		.current_dir = dirent,
-		.hide_attr_value = NULL // Initialize to NULL
-	};
+	struct getdents_callback64 buf = { .ctx.actor = filldir64,
+					   .count = count,
+					   .current_dir = dirent,
+					   .hide_attr_value = NULL };
 	int error;
 	struct file *file;
 	struct dentry *dir_dentry;
@@ -524,35 +522,30 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd, struct linux_dirent64 __user *,
 		return -EINVAL;
 
 	dir_dentry = file->f_path.dentry;
-	idmap = file->f_path.mnt
-			->mnt_idmap; // Corrected: Access mnt_idmap correctly
+	idmap = file->f_path.mnt->mnt_idmap;
 
-	// Get the directory's xattr
-	xattr_len = xattr_len = vfs_getxattr(idmap, dir_dentry,
-					     XATTR_USER_PREFIX, XATTR_HIDE_KEY,
-					     hide_value, sizeof(hide_value));
+	// Attempt to read the custom xattr
+	xattr_len = vfs_getxattr(idmap, dir_dentry, XATTR_HIDE_KEY, hide_value,
+				 sizeof(hide_value));
 
-	if (xattr_len < 0 && xattr_len != -ENODATA) {
-		// Handle xattr errors (excluding ENOATTR)
+	if (xattr_len < 0 && xattr_len != -ENODATA)
 		return xattr_len;
-	}
 
 	if (xattr_len >= 0) {
 		buf.hide_attr_value = kstrdup(hide_value, GFP_KERNEL);
-		if (!buf.hide_attr_value) {
-			return -ENOMEM; // Handle memory allocation failure
-		}
+		if (!buf.hide_attr_value)
+			return -ENOMEM;
 	}
 
 	error = iterate_dir(file, &buf.ctx);
 
-	if (buf.hide_attr_value) {
-		kfree(buf.hide_attr_value); // Free allocated memory
-	}
+	if (buf.hide_attr_value)
+		kfree(buf.hide_attr_value);
 
 	if (error >= 0)
 		error = buf.error;
-	if (buf->prev_reclen) {
+
+	if (buf.prev_reclen) {
 		struct linux_dirent64 __user *lastdirent;
 		typeof(lastdirent->d_off) d_off = buf.ctx.pos;
 
