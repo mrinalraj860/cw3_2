@@ -334,101 +334,14 @@ SYSCALL_DEFINE3(getdents, unsigned int, fd, struct linux_dirent __user *,
 	return error;
 }
 
-// struct getdents_callback64 {
-// 	struct dir_context ctx;
-// 	struct linux_dirent64 __user *current_dir;
-// 	int prev_reclen;
-// 	int count;
-// 	int error;
-// 	//CW3
-// 	// char *hide_attr_value; // New field to store xattr value
-// };
-
-// static bool filldir64(struct dir_context *ctx, const char *name, int namlen,
-// 		      loff_t offset, u64 ino, unsigned int d_type)
-// {
-// 	struct linux_dirent64 __user *dirent, *prev;
-// 	struct getdents_callback64 *buf =
-// 		container_of(ctx, struct getdents_callback64, ctx);
-// 	int reclen = ALIGN(offsetof(struct linux_dirent64, d_name) + namlen + 1,
-// 			   sizeof(u64));
-// 	int prev_reclen;
-
-// 	buf->error = verify_dirent_name(name, namlen);
-// 	if (unlikely(buf->error))
-// 		return false;
-// 	buf->error = -EINVAL; /* only used if we fail.. */
-// 	if (reclen > buf->count)
-// 		return false;
-// 	prev_reclen = buf->prev_reclen;
-// 	if (prev_reclen && signal_pending(current))
-// 		return false;
-// 	dirent = buf->current_dir;
-// 	prev = (void __user *)dirent - prev_reclen;
-// 	if (!user_write_access_begin(prev, reclen + prev_reclen))
-// 		goto efault;
-
-// 	/* This might be 'dirent->d_off', but if so it will get overwritten */
-// 	unsafe_put_user(offset, &prev->d_off, efault_end);
-// 	unsafe_put_user(ino, &dirent->d_ino, efault_end);
-// 	unsafe_put_user(reclen, &dirent->d_reclen, efault_end);
-// 	unsafe_put_user(d_type, &dirent->d_type, efault_end);
-// 	unsafe_copy_dirent_name(dirent->d_name, name, namlen, efault_end);
-// 	user_write_access_end();
-
-// 	buf->prev_reclen = reclen;
-// 	buf->current_dir = (void __user *)dirent + reclen;
-// 	buf->count -= reclen;
-// 	return true;
-
-// efault_end:
-// 	user_write_access_end();
-// efault:
-// 	buf->error = -EFAULT;
-// 	return false;
-// }
-// //CW3
-// #define XATTR_KEY "user.cw3_hide"
-
-// SYSCALL_DEFINE3(getdents64, unsigned int, fd, struct linux_dirent64 __user *,
-// 		dirent, unsigned int, count)
-// {
-// 	CLASS(fd_pos, f)(fd);
-// 	struct getdents_callback64 buf = { .ctx.actor = filldir64,
-// 					   .count = count,
-// 					   .current_dir = dirent };
-// 	int error;
-
-// 	if (fd_empty(f))
-// 		return -EBADF;
-
-// 	error = iterate_dir(fd_file(f), &buf.ctx);
-// 	if (error >= 0)
-// 		error = buf.error;
-// 	if (buf.prev_reclen) {
-// 		struct linux_dirent64 __user *lastdirent;
-// 		typeof(lastdirent->d_off) d_off = buf.ctx.pos;
-
-// 		lastdirent = (void __user *)buf.current_dir - buf.prev_reclen;
-// 		if (put_user(d_off, &lastdirent->d_off))
-// 			error = -EFAULT;
-// 		else
-// 			error = count - buf.count;
-// 	}
-// 	return error;
-// }
-
-// Define the xattr key
-#define XATTR_HIDE_KEY "user.cw3_hide"
-
-// Modified getdents_callback64 struct
 struct getdents_callback64 {
 	struct dir_context ctx;
 	struct linux_dirent64 __user *current_dir;
 	int prev_reclen;
 	int count;
 	int error;
-	char *hide_attr_value; // New field to store xattr value
+	//CW3
+	// char *hide_attr_value; // New field to store xattr value
 };
 
 static bool filldir64(struct dir_context *ctx, const char *name, int namlen,
@@ -445,29 +358,6 @@ static bool filldir64(struct dir_context *ctx, const char *name, int namlen,
 	if (unlikely(buf->error))
 		return false;
 	buf->error = -EINVAL; /* only used if we fail.. */
-
-	// Filtering logic based on xattr
-	if (buf->hide_attr_value) {
-		if ((strcmp(buf->hide_attr_value, "regular") == 0 &&
-		     d_type == DT_REG) ||
-		    (strcmp(buf->hide_attr_value, "directory") == 0 &&
-		     d_type == DT_DIR) ||
-		    (strcmp(buf->hide_attr_value, "symlink") == 0 &&
-		     d_type == DT_LNK) ||
-		    (strcmp(buf->hide_attr_value, "character") == 0 &&
-		     d_type == DT_CHR) ||
-		    (strcmp(buf->hide_attr_value, "block") == 0 &&
-		     d_type == DT_BLK) ||
-		    (strcmp(buf->hide_attr_value, "fifo") == 0 &&
-		     d_type == DT_FIFO) ||
-		    (strcmp(buf->hide_attr_value, "socket") == 0 &&
-		     d_type == DT_SOCK) ||
-		    (strcmp(buf->hide_attr_value, "unknown") == 0 &&
-		     d_type == DT_UNKNOWN)) {
-			return true; // Skip this entry
-		}
-	}
-
 	if (reclen > buf->count)
 		return false;
 	prev_reclen = buf->prev_reclen;
@@ -497,54 +387,24 @@ efault:
 	buf->error = -EFAULT;
 	return false;
 }
+//CW3
+#define XATTR_KEY "user.cw3_hide"
 
-// Modified SYSCALL_DEFINE3 for getdents64
 SYSCALL_DEFINE3(getdents64, unsigned int, fd, struct linux_dirent64 __user *,
 		dirent, unsigned int, count)
 {
 	CLASS(fd_pos, f)(fd);
 	struct getdents_callback64 buf = { .ctx.actor = filldir64,
 					   .count = count,
-					   .current_dir = dirent,
-					   .hide_attr_value = NULL };
+					   .current_dir = dirent };
 	int error;
-	struct file *file;
-	struct dentry *dir_dentry;
-	struct mnt_idmap *idmap;
-	char hide_value[32];
-	ssize_t xattr_len;
 
 	if (fd_empty(f))
 		return -EBADF;
 
-	file = fd_file(f);
-	if (!file || !file->f_path.dentry)
-		return -EINVAL;
-
-	dir_dentry = file->f_path.dentry;
-	idmap = file->f_path.mnt->mnt_idmap;
-
-	// Attempt to read the custom xattr
-	xattr_len = vfs_getxattr(idmap, dir_dentry, XATTR_HIDE_KEY, hide_value,
-				 sizeof(hide_value));
-
-	if (xattr_len < 0 && xattr_len != -ENODATA)
-		return xattr_len;
-
-	if (xattr_len >= 0) {
-		buf.hide_attr_value = kstrdup(hide_value, GFP_KERNEL);
-		if (!buf.hide_attr_value)
-			return -ENOMEM;
-	}
-
-	error = iterate_dir(file, &buf.ctx);
-
-	if (buf.hide_attr_value)
-		kfree(buf.hide_attr_value);
-
+	error = iterate_dir(fd_file(f), &buf.ctx);
 	if (error >= 0)
 		error = buf.error;
-
 	if (buf.prev_reclen) {
 		struct linux_dirent64 __user *lastdirent;
 		typeof(lastdirent->d_off) d_off = buf.ctx.pos;
