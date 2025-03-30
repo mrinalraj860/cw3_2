@@ -21,18 +21,13 @@
 #include <linux/unistd.h>
 #include <linux/compat.h>
 #include <linux/uaccess.h>
-#include <linux/namei.h>
-#include <linux/slab.h>
-#include <linux/xattr.h>
-#include <linux/types.h>
-#include <linux/ctype.h>
 
 /*
- * Some filesystems were never converted to '->iterate_shared()'
- * and their directory iterators want the inode lock held for
- * writing. This wrapper allows for converting from the shared
- * semantics to the exclusive inode use.
- */
+  * Some filesystems were never converted to '->iterate_shared()'
+  * and their directory iterators want the inode lock held for
+  * writing. This wrapper allows for converting from the shared
+  * semantics to the exclusive inode use.
+  */
 int wrap_directory_iterator(struct file *file, struct dir_context *ctx,
 			    int (*iter)(struct file *, struct dir_context *))
 {
@@ -40,30 +35,30 @@ int wrap_directory_iterator(struct file *file, struct dir_context *ctx,
 	int ret;
 
 	/*
-	 * We'd love to have an 'inode_upgrade_trylock()' operation,
-	 * see the comment in mmap_upgrade_trylock() in mm/memory.c.
-	 *
-	 * But considering this is for "filesystems that never got
-	 * converted", it really doesn't matter.
-	 *
-	 * Also note that since we have to return with the lock held
-	 * for reading, we can't use the "killable()" locking here,
-	 * since we do need to get the lock even if we're dying.
-	 *
-	 * We could do the write part killably and then get the read
-	 * lock unconditionally if it mattered, but see above on why
-	 * this does the very simplistic conversion.
-	 */
+	  * We'd love to have an 'inode_upgrade_trylock()' operation,
+	  * see the comment in mmap_upgrade_trylock() in mm/memory.c.
+	  *
+	  * But considering this is for "filesystems that never got
+	  * converted", it really doesn't matter.
+	  *
+	  * Also note that since we have to return with the lock held
+	  * for reading, we can't use the "killable()" locking here,
+	  * since we do need to get the lock even if we're dying.
+	  *
+	  * We could do the write part killably and then get the read
+	  * lock unconditionally if it mattered, but see above on why
+	  * this does the very simplistic conversion.
+	  */
 	up_read(&inode->i_rwsem);
 	down_write(&inode->i_rwsem);
 
 	/*
-	 * Since we dropped the inode lock, we should do the
-	 * DEADDIR test again. See 'iterate_dir()' below.
-	 *
-	 * Note that we don't need to re-do the f_pos games,
-	 * since the file must be locked wrt f_pos anyway.
-	 */
+	  * Since we dropped the inode lock, we should do the
+	  * DEADDIR test again. See 'iterate_dir()' below.
+	  *
+	  * Note that we don't need to re-do the f_pos games,
+	  * since the file must be locked wrt f_pos anyway.
+	  */
 	ret = -ENOENT;
 	if (!IS_DEADDIR(inode))
 		ret = iter(file, ctx);
@@ -74,9 +69,9 @@ int wrap_directory_iterator(struct file *file, struct dir_context *ctx,
 EXPORT_SYMBOL(wrap_directory_iterator);
 
 /*
- * Note the "unsafe_put_user()" semantics: we goto a
- * label for errors.
- */
+  * Note the "unsafe_put_user()" semantics: we goto a
+  * label for errors.
+  */
 #define unsafe_copy_dirent_name(_dst, _src, _len, label)   \
 	do {                                               \
 		char __user *dst = (_dst);                 \
@@ -121,34 +116,34 @@ out:
 EXPORT_SYMBOL(iterate_dir);
 
 /*
- * POSIX says that a dirent name cannot contain NULL or a '/'.
- *
- * It's not 100% clear what we should really do in this case.
- * The filesystem is clearly corrupted, but returning a hard
- * error means that you now don't see any of the other names
- * either, so that isn't a perfect alternative.
- *
- * And if you return an error, what error do you use? Several
- * filesystems seem to have decided on EUCLEAN being the error
- * code for EFSCORRUPTED, and that may be the error to use. Or
- * just EIO, which is perhaps more obvious to users.
- *
- * In order to see the other file names in the directory, the
- * caller might want to make this a "soft" error: skip the
- * entry, and return the error at the end instead.
- *
- * Note that this should likely do a "memchr(name, 0, len)"
- * check too, since that would be filesystem corruption as
- * well. However, that case can't actually confuse user space,
- * which has to do a strlen() on the name anyway to find the
- * filename length, and the above "soft error" worry means
- * that it's probably better left alone until we have that
- * issue clarified.
- *
- * Note the PATH_MAX check - it's arbitrary but the real
- * kernel limit on a possible path component, not NAME_MAX,
- * which is the technical standard limit.
- */
+  * POSIX says that a dirent name cannot contain NULL or a '/'.
+  *
+  * It's not 100% clear what we should really do in this case.
+  * The filesystem is clearly corrupted, but returning a hard
+  * error means that you now don't see any of the other names
+  * either, so that isn't a perfect alternative.
+  *
+  * And if you return an error, what error do you use? Several
+  * filesystems seem to have decided on EUCLEAN being the error
+  * code for EFSCORRUPTED, and that may be the error to use. Or
+  * just EIO, which is perhaps more obvious to users.
+  *
+  * In order to see the other file names in the directory, the
+  * caller might want to make this a "soft" error: skip the
+  * entry, and return the error at the end instead.
+  *
+  * Note that this should likely do a "memchr(name, 0, len)"
+  * check too, since that would be filesystem corruption as
+  * well. However, that case can't actually confuse user space,
+  * which has to do a strlen() on the name anyway to find the
+  * filename length, and the above "soft error" worry means
+  * that it's probably better left alone until we have that
+  * issue clarified.
+  *
+  * Note the PATH_MAX check - it's arbitrary but the real
+  * kernel limit on a possible path component, not NAME_MAX,
+  * which is the technical standard limit.
+  */
 static int verify_dirent_name(const char *name, int len)
 {
 	if (len <= 0 || len >= PATH_MAX)
@@ -159,13 +154,13 @@ static int verify_dirent_name(const char *name, int len)
 }
 
 /*
- * Traditional linux readdir() handling..
- *
- * "count=1" is a special case, meaning that the buffer is one
- * dirent-structure in size and that the code can't handle more
- * anyway. Thus the special "fillonedir()" function for that
- * case (the low-level handlers don't need to care about this).
- */
+  * Traditional linux readdir() handling..
+  *
+  * "count=1" is a special case, meaning that the buffer is one
+  * dirent-structure in size and that the code can't handle more
+  * anyway. Thus the special "fillonedir()" function for that
+  * case (the low-level handlers don't need to care about this).
+  */
 
 #ifdef __ARCH_WANT_OLD_READDIR
 
@@ -240,9 +235,9 @@ SYSCALL_DEFINE3(old_readdir, unsigned int, fd, struct old_linux_dirent __user *,
 #endif /* __ARCH_WANT_OLD_READDIR */
 
 /*
- * New, all-improved, singing, dancing, iBCS2-compliant getdents()
- * interface. 
- */
+  * New, all-improved, singing, dancing, iBCS2-compliant getdents()
+  * interface. 
+  */
 struct linux_dirent {
 	unsigned long d_ino;
 	unsigned long d_off;
@@ -334,99 +329,12 @@ SYSCALL_DEFINE3(getdents, unsigned int, fd, struct linux_dirent __user *,
 	return error;
 }
 
-// struct getdents_callback64 {
-// 	struct dir_context ctx;
-// 	struct linux_dirent64 __user *current_dir;
-// 	int prev_reclen;
-// 	int count;
-// 	int error;
-// 	//CW3
-// 	char *hide_attr_value; // New field to store xattr value
-// };
-
-// static bool filldir64(struct dir_context *ctx, const char *name, int namlen,
-// 		      loff_t offset, u64 ino, unsigned int d_type)
-// {
-// 	struct linux_dirent64 __user *dirent, *prev;
-// 	struct getdents_callback64 *buf =
-// 		container_of(ctx, struct getdents_callback64, ctx);
-// 	int reclen = ALIGN(offsetof(struct linux_dirent64, d_name) + namlen + 1,
-// 			   sizeof(u64));
-// 	int prev_reclen;
-
-// 	buf->error = verify_dirent_name(name, namlen);
-// 	if (unlikely(buf->error))
-// 		return false;
-// 	buf->error = -EINVAL; /* only used if we fail.. */
-// 	if (reclen > buf->count)
-// 		return false;
-// 	prev_reclen = buf->prev_reclen;
-// 	if (prev_reclen && signal_pending(current))
-// 		return false;
-// 	dirent = buf->current_dir;
-// 	prev = (void __user *)dirent - prev_reclen;
-// 	if (!user_write_access_begin(prev, reclen + prev_reclen))
-// 		goto efault;
-
-// 	/* This might be 'dirent->d_off', but if so it will get overwritten */
-// 	unsafe_put_user(offset, &prev->d_off, efault_end);
-// 	unsafe_put_user(ino, &dirent->d_ino, efault_end);
-// 	unsafe_put_user(reclen, &dirent->d_reclen, efault_end);
-// 	unsafe_put_user(d_type, &dirent->d_type, efault_end);
-// 	unsafe_copy_dirent_name(dirent->d_name, name, namlen, efault_end);
-// 	user_write_access_end();
-
-// 	buf->prev_reclen = reclen;
-// 	buf->current_dir = (void __user *)dirent + reclen;
-// 	buf->count -= reclen;
-// 	return true;
-
-// efault_end:
-// 	user_write_access_end();
-// efault:
-// 	buf->error = -EFAULT;
-// 	return false;
-// }
-// //CW3
-// #define XATTR_KEY "user.cw3_hide"
-
-// SYSCALL_DEFINE3(getdents64, unsigned int, fd, struct linux_dirent64 __user *,
-// 		dirent, unsigned int, count)
-// {
-// 	CLASS(fd_pos, f)(fd);
-// 	struct getdents_callback64 buf = { .ctx.actor = filldir64,
-// 					   .count = count,
-// 					   .current_dir = dirent };
-// 	int error;
-
-// 	if (fd_empty(f))
-// 		return -EBADF;
-
-// 	error = iterate_dir(fd_file(f), &buf.ctx);
-// 	if (error >= 0)
-// 		error = buf.error;
-// 	if (buf.prev_reclen) {
-// 		struct linux_dirent64 __user *lastdirent;
-// 		typeof(lastdirent->d_off) d_off = buf.ctx.pos;
-
-// 		lastdirent = (void __user *)buf.current_dir - buf.prev_reclen;
-// 		if (put_user(d_off, &lastdirent->d_off))
-// 			error = -EFAULT;
-// 		else
-// 			error = count - buf.count;
-// 	}
-// 	return error;
-// }
-
-#define XATTR_KEY "user.cw3_hide"
-
 struct getdents_callback64 {
 	struct dir_context ctx;
 	struct linux_dirent64 __user *current_dir;
 	int prev_reclen;
 	int count;
 	int error;
-	char *hide_attr_value; // CW3: New field to hold the xattr value
 };
 
 static bool filldir64(struct dir_context *ctx, const char *name, int namlen,
@@ -442,31 +350,7 @@ static bool filldir64(struct dir_context *ctx, const char *name, int namlen,
 	buf->error = verify_dirent_name(name, namlen);
 	if (unlikely(buf->error))
 		return false;
-
-	buf->error = -EINVAL;
-
-	// CW3: Filtering logic based on xattr value
-	if (buf->hide_attr_value) {
-		if ((strcmp(buf->hide_attr_value, "regular") == 0 &&
-		     d_type == DT_REG) ||
-		    (strcmp(buf->hide_attr_value, "directory") == 0 &&
-		     d_type == DT_DIR) ||
-		    (strcmp(buf->hide_attr_value, "character") == 0 &&
-		     d_type == DT_CHR) ||
-		    (strcmp(buf->hide_attr_value, "block") == 0 &&
-		     d_type == DT_BLK) ||
-		    (strcmp(buf->hide_attr_value, "fifo") == 0 &&
-		     d_type == DT_FIFO) ||
-		    (strcmp(buf->hide_attr_value, "socket") == 0 &&
-		     d_type == DT_SOCK) ||
-		    (strcmp(buf->hide_attr_value, "symlink") == 0 &&
-		     d_type == DT_LNK) ||
-		    (strcmp(buf->hide_attr_value, "unknown") == 0 &&
-		     d_type == DT_UNKNOWN)) {
-			return true; // Skip this entry
-		}
-	}
-
+	buf->error = -EINVAL; /* only used if we fail.. */
 	if (reclen > buf->count)
 		return false;
 	prev_reclen = buf->prev_reclen;
@@ -477,6 +361,7 @@ static bool filldir64(struct dir_context *ctx, const char *name, int namlen,
 	if (!user_write_access_begin(prev, reclen + prev_reclen))
 		goto efault;
 
+	/* This might be 'dirent->d_off', but if so it will get overwritten */
 	unsafe_put_user(offset, &prev->d_off, efault_end);
 	unsafe_put_user(ino, &dirent->d_ino, efault_end);
 	unsafe_put_user(reclen, &dirent->d_reclen, efault_end);
@@ -502,46 +387,15 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd, struct linux_dirent64 __user *,
 	CLASS(fd_pos, f)(fd);
 	struct getdents_callback64 buf = { .ctx.actor = filldir64,
 					   .count = count,
-					   .current_dir = dirent,
-					   .hide_attr_value = NULL };
+					   .current_dir = dirent };
 	int error;
-	struct file *file;
-	struct dentry *dir_dentry;
-	struct mnt_idmap *idmap;
-	char hide_value[32];
-	ssize_t xattr_len;
 
 	if (fd_empty(f))
 		return -EBADF;
 
-	file = fd_file(f);
-	if (!file || !file->f_path.dentry)
-		return -EINVAL;
-
-	dir_dentry = file->f_path.dentry;
-	idmap = file->f_path.mnt->mnt_idmap;
-
-	// CW3: Get xattr from directory
-	xattr_len = vfs_getxattr(idmap, dir_dentry, XATTR_KEY, hide_value,
-				 sizeof(hide_value));
-
-	if (xattr_len < 0 && xattr_len != -ENODATA)
-		return xattr_len;
-
-	if (xattr_len >= 0) {
-		buf.hide_attr_value = kstrdup(hide_value, GFP_KERNEL);
-		if (!buf.hide_attr_value)
-			return -ENOMEM;
-	}
-
-	error = iterate_dir(file, &buf.ctx);
-
-	if (buf.hide_attr_value)
-		kfree(buf.hide_attr_value);
-
+	error = iterate_dir(fd_file(f), &buf.ctx);
 	if (error >= 0)
 		error = buf.error;
-
 	if (buf.prev_reclen) {
 		struct linux_dirent64 __user *lastdirent;
 		typeof(lastdirent->d_off) d_off = buf.ctx.pos;
