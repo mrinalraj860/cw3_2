@@ -340,10 +340,8 @@ struct getdents_callback64 {
 	int prev_reclen;
 	int count;
 	int error;
-
-	// CW3 added field
-	const char *filter_type;
-	struct file *dir_file;
+	//CW3
+	// char *hide_attr_value; // New field to store xattr value
 };
 
 static bool filldir64(struct dir_context *ctx, const char *name, int namlen,
@@ -392,33 +390,6 @@ efault:
 //CW3
 #define XATTR_KEY "user.cw3_hide"
 
-// SYSCALL_DEFINE3(getdents64, unsigned int, fd, struct linux_dirent64 __user *,
-// 		dirent, unsigned int, count)
-// {
-// 	CLASS(fd_pos, f)(fd);
-// 	struct getdents_callback64 buf = { .ctx.actor = filldir64,
-// 					   .count = count,
-// 					   .current_dir = dirent };
-// 	int error;
-
-// 	if (fd_empty(f))
-// 		return -EBADF;
-
-// 	error = iterate_dir(fd_file(f), &buf.ctx);
-// 	if (error >= 0)
-// 		error = buf.error;
-// 	if (buf.prev_reclen) {
-// 		struct linux_dirent64 __user *lastdirent;
-// 		typeof(lastdirent->d_off) d_off = buf.ctx.pos;
-
-// 		lastdirent = (void __user *)buf.current_dir - buf.prev_reclen;
-// 		if (put_user(d_off, &lastdirent->d_off))
-// 			error = -EFAULT;
-// 		else
-// 			error = count - buf.count;
-// 	}
-// 	return error;
-// }
 SYSCALL_DEFINE3(getdents64, unsigned int, fd, struct linux_dirent64 __user *,
 		dirent, unsigned int, count)
 {
@@ -427,35 +398,11 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd, struct linux_dirent64 __user *,
 					   .count = count,
 					   .current_dir = dirent };
 	int error;
-	struct file *file;
-	struct dentry *dir_dentry;
-	char hide_value
-		[32]; // Assuming max xattr value length is 32. Adjust if needed.
-	ssize_t xattr_len;
 
 	if (fd_empty(f))
 		return -EBADF;
 
-	file = fd_file(f);
-	if (!file || !file->f_path.dentry)
-		return -EINVAL; // Handle potential null pointers
-
-	dir_dentry = file->f_path.dentry;
-
-	// 1. Get the directory's xattr
-	xattr_len = vfs_getxattr(dir_dentry, XATTR_KEY, "user.cw3_hide",
-				 hide_value, sizeof(hide_value));
-
-	if (xattr_len < 0 && xattr_len != -ENODATA) {
-		// Handle xattr errors (excluding ENOATTR which is handled later)
-		return xattr_len;
-	}
-
-	buf.ctx.hide_attr_value =
-		(xattr_len >= 0) ? hide_value :
-				   NULL; // Pass the hide value to the callback
-
-	error = iterate_dir(file, &buf.ctx);
+	error = iterate_dir(fd_file(f), &buf.ctx);
 	if (error >= 0)
 		error = buf.error;
 	if (buf.prev_reclen) {
