@@ -21,6 +21,8 @@
 #include <linux/unistd.h>
 #include <linux/compat.h>
 #include <linux/uaccess.h>
+#include <linux/xattr.h>
+#include <linux/namei.h>
 
 /*
   * Some filesystems were never converted to '->iterate_shared()'
