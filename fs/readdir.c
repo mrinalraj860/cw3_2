@@ -418,6 +418,7 @@ SYSCALL_DEFINE3(getdents, unsigned int, fd, struct linux_dirent __user *,
 // 	return error;
 // }
 
+// Define the xattr key
 #define XATTR_HIDE_KEY "user.cw3_hide"
 
 // Modified getdents_callback64 struct
@@ -523,12 +524,13 @@ SYSCALL_DEFINE3(getdents64, unsigned int, fd, struct linux_dirent64 __user *,
 		return -EINVAL;
 
 	dir_dentry = file->f_path.dentry;
-	idmap = file->f_path.mnt;
+	idmap = file->f_path.mnt
+			->mnt_idmap; // Corrected: Access mnt_idmap correctly
 
 	// Get the directory's xattr
 	xattr_len = vfs_getxattr(idmap, dir_dentry, XATTR_NAME_USER,
 				 XATTR_HIDE_KEY, hide_value,
-				 sizeof(hide_value));
+				 sizeof(hide_value)); // Corrected: sizeof
 
 	if (xattr_len < 0 && xattr_len != -ENODATA) {
 		// Handle xattr errors (excluding ENOATTR)
